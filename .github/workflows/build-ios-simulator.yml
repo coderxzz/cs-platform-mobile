@@ -8,15 +8,13 @@ name: build-ios-simulator
 #
 # 为什么用 GitHub Actions：
 #   官方计费文档明确写：公有仓库的标准 runner 免费（含 macOS）。
-#   所以我们不花一分钱就能拿到一台 macOS 编译机。
 #
 # 产出物怎么用：
-#   下载 artifact 里的 .app -> 压成 zip -> 上传 appetize.io -> 浏览器里跑
+#   下载 artifact 里的 zip -> 上传 appetize.io -> 浏览器里跑 iOS
 
 on:
   push:
     branches: [main]
-    paths: ['app-ios/**', 'web/**']
   workflow_dispatch:
 
 jobs:
@@ -34,6 +32,7 @@ jobs:
           cd web
           npm ci
           npm run build
+          ls -la dist/html/*.html
 
       - name: 同步进 iOS 工程
         run: |
@@ -43,10 +42,18 @@ jobs:
           npm ci
           npx cap sync ios
 
-      - name: 安装 CocoaPods
+      - name: 安装 CocoaPods 依赖
         run: |
           cd app-ios/ios/App
-          pod install
+          pod install --repo-update
+          ls -la
+          echo "--- workspace 是否生成 ---"
+          ls -d App.xcworkspace || (echo "workspace 没生成" && exit 1)
+
+      - name: 列出可用 scheme（排错用）
+        run: |
+          cd app-ios/ios/App
+          xcodebuild -workspace App.xcworkspace -list || true
 
       - name: 编译模拟器版 .app（不签名）
         run: |
@@ -60,16 +67,25 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_ENTITLEMENTS="" \
             build
 
       - name: 打包成 appetize 能吃的 zip
         run: |
-          cd app-ios/ios/App/build/Build/Products/Debug-iphonesimulator
-          ls -la
-          zip -r "\$GITHUB_WORKSPACE/cs-app-simulator.zip" "App.app"
+          set -e
+          cd app-ios/ios/App
+          APP=$(find build/Build/Products -maxdepth 2 -name "*.app" -type d | head -1)
+          echo "找到 app: $APP"
+          if [ -z "$APP" ]; then echo "没找到 .app"; exit 1; fi
+          cd "$(dirname "$APP")"
+          zip -r -y "$GITHUB_WORKSPACE/cs-app-simulator.zip" "$(basename "$APP")"
+          cd "$GITHUB_WORKSPACE"
+          ls -la cs-app-simulator.zip
 
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: ios-simulator-app
           path: cs-app-simulator.zip
           retention-days: 14
+          if-no-files-found: warn
