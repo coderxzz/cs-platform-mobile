@@ -97,6 +97,33 @@ jobs:
         run: |
           # 静态根目录必须是 html 产物所在目录，否则 /chat 会 404
           cd web/dist/html
+          # 探针：把 env(safe-area-inset-*) 的真实取值打到页面上，截图能读到数字
+          python3 - <<'PYEOF'
+          import re
+          probe = '''<script>
+          window.addEventListener("load", function () {
+            var p = document.createElement("div");
+            p.style.cssText = "position:fixed;top:0;left:0;width:0;height:0;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)";
+            document.body.appendChild(p);
+            var cs = getComputedStyle(p);
+            var d = document.createElement("div");
+            d.style.cssText = "position:fixed;left:0;top:70px;z-index:99999;background:#c00;color:#fff;font:13px monospace;padding:6px;line-height:1.5;white-space:pre";
+            d.textContent = "SAFE top=" + cs.paddingTop + " bottom=" + cs.paddingBottom +
+              "\\ninnerH=" + innerHeight + " screenH=" + screen.height +
+              "\\ndpr=" + devicePixelRatio + " ua_iPhone=" + /iPhone/.test(navigator.userAgent);
+            document.body.appendChild(d);
+          });
+          </script>'''
+          import io
+          fp = 'chat.html'
+          s = io.open(fp, encoding='utf-8').read()
+          if 'SAFE top=' not in s:
+              s = s.replace('</body>', probe + '</body>')
+              io.open(fp, 'w', encoding='utf-8').write(s)
+              print('探针已注入 chat.html')
+          else:
+              print('探针已存在')
+          PYEOF
           WEB_ROOT="$(pwd)" nohup python3 "$GITHUB_WORKSPACE/ci-mock-server.py" 8000 > /tmp/mock.log 2>&1 &
           sleep 3
           echo "--- 自检 ---"
