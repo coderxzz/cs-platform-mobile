@@ -39,6 +39,10 @@ jobs:
           cd app-ios
           rm -rf www && mkdir -p www
           cp -r ../web/dist/html/. www/
+          # Capacitor 要求 www 里有 index.html 作入口；
+          # 我们的构建产物是 chat/desk/admin/submit 四个页面，所以补一个启动页
+          cp launcher-index.html www/index.html
+          test -f www/index.html || (echo "index.html 缺失" && exit 1)
           npm ci
           npx cap sync ios
 

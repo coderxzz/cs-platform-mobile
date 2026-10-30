@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no"/>
+<title>客服</title>
+<style>
+  html,body{margin:0;height:100%;background:#0f1115;
+    font:14px -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;
+    color:#86909c}
+  .wrap{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px;text-align:center}
+  .title{font-size:16px;color:#e5e6eb;margin-bottom:10px}
+  .spin{width:26px;height:26px;border:2px solid #2a2d35;border-top-color:#4e8cff;
+    border-radius:50%;animation:r .8s linear infinite;margin-bottom:18px}
+  @keyframes r{to{transform:rotate(360deg)}}
+  .hint{font-size:13px;line-height:1.7;max-width:260px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="spin"></div>
+  <div class="title">正在连接客服…</div>
+  <div class="hint" id="hint">若长时间无响应，请从游戏内重新打开</div>
+</div>
+<script>
+/**
+ * 原生壳（iOS / Android）的启动页。
+ *
+ * 为什么需要这个文件：
+ *   Capacitor 要求 www 里有 index.html 作为入口，而我们的前端构建产物
+ *   是 chat/desk/admin/submit 四个独立页面，没有 index.html。
+ *   这个文件负责把「游戏传进来的身份参数」转交给聊天页。
+ *
+ * 参数来源优先级：
+ *   1. URL 查询参数（原生层拼好 URL 传进来）
+ *   2. localStorage 里上次保存的（原生层可以预写）
+ *   3. 都没有 -> 停在提示页
+ */
+(function () {
+  var q = new URLSearchParams(location.search);
+  var appId = q.get('app_id') || localStorage.getItem('cs_app_id') || '';
+  var roleId = q.get('role_id') || localStorage.getItem('cs_role_id') || '';
+  var ts   = q.get('ts')   || '';
+  var sign = q.get('sign') || '';
+
+  if (appId && roleId && ts && sign) {
+    location.replace('chat.html?app_id=' + encodeURIComponent(appId) +
+      '&role_id=' + encodeURIComponent(roleId) +
+      '&ts=' + encodeURIComponent(ts) +
+      '&sign=' + encodeURIComponent(sign));
+    return;
+  }
+
+  // 参数不全：如果是原生层直接打开的，等它注入；否则提示
+  setTimeout(function () {
+    var h = document.getElementById('hint');
+    if (h) h.textContent = '缺少身份参数。请从游戏内点击「联系客服」进入。';
+    var s = document.querySelector('.spin');
+    if (s) s.style.display = 'none';
+  }, 4000);
+})();
+</script>
+</body>
+</html>
