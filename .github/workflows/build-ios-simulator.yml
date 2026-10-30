@@ -125,6 +125,33 @@ jobs:
           xcrun simctl install "$DEV" "$APP"
           xcrun simctl launch "$DEV" com.cokutau.csapp
 
+      - name: 装 idb（用来点按钮和模拟键盘输入）
+        run: |
+          brew tap facebook/fb || true
+          brew install idb-companion || true
+          python3 -m pip install --quiet fb-idb || true
+          which idb || echo "idb 没装上，后面会退化"
+
+      - name: 真实键盘输入 + 点发送（验证 AI 回复）
+        run: |
+          set -x
+          # 屏幕是 393x852 点。输入框在底部，发送按钮在右下。
+          # 坐标从截图量出来：输入框中心 ~ (200, 790)，发送按钮 ~ (345, 790)
+          idb ui tap 200 790 --udid "$DEV" || echo "tap input 失败"
+          sleep 2
+          xcrun simctl io "$DEV" screenshot shots/shot-3-focused.png || true
+
+          # 模拟键盘输入（中文）
+          idb ui text "我的充值没到账" --udid "$DEV" || echo "输入失败"
+          sleep 2
+          xcrun simctl io "$DEV" screenshot shots/shot-4-typed.png || true
+
+          # 点发送
+          idb ui tap 345 790 --udid "$DEV" || echo "tap send 失败"
+          sleep 8
+          xcrun simctl io "$DEV" screenshot shots/shot-5-replied.png || true
+          ls -la shots/
+
       - name: 等页面加载并截图
         run: |
           set -e
