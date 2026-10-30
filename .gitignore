@@ -13,3 +13,9 @@ ios/App/Pods/
 ios/App/build/
 *.xcworkspace/xcuserdata/
 .DS_Store
+
+# iOS 工程：保留工程文件，排除依赖和构建产物
+app-ios/ios/App/Pods/
+app-ios/ios/App/build/
+app-ios/ios/App/App.xcworkspace/xcuserdata/
+*.xcuserstate
