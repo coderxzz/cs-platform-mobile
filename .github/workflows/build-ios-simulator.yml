@@ -95,14 +95,18 @@ jobs:
 
       - name: 起模拟后端（托管前端 + 假接口）
         run: |
-          cp ci-mock-server.py web/dist/../ 2>/dev/null || true
-          cd web/dist && python3 "$GITHUB_WORKSPACE/ci-mock-server.py" 8000 > /tmp/mock.log 2>&1 &
-          sleep 2
-          curl -s -o /dev/null -w "首页 HTTP %{http_code}\n" http://127.0.0.1:8000/chat
+          # 静态根目录必须是 html 产物所在目录，否则 /chat 会 404
+          cd web/dist/html
+          WEB_ROOT="$(pwd)" nohup python3 "$GITHUB_WORKSPACE/ci-mock-server.py" 8000 > /tmp/mock.log 2>&1 &
+          sleep 3
+          echo "--- 自检 ---"
+          curl -s -o /dev/null -w "  /chat -> %{http_code}\n" http://127.0.0.1:8000/chat
+          curl -s -o /dev/null -w "  /desk -> %{http_code}\n" http://127.0.0.1:8000/desk
           curl -s -X POST http://127.0.0.1:8000/v1/embed/session \
             -H "Content-Type: application/json" \
             -d '{"app_id":"app_ci","role_id":"999001"}' | head -c 200
           echo
+          cat /tmp/mock.log | head -5
 
       - name: 启动 iOS 模拟器并安装 App
         run: |
@@ -125,14 +129,16 @@ jobs:
         run: |
           set -e
           mkdir -p shots
-          # 页面加载 + 会话交换需要一点时间
-          sleep 12
+          sleep 15
           xcrun simctl io "$DEV" screenshot shots/shot-1-launch.png
-          echo "第一张截图完成"
+          echo "--- 再来一张（等会话交换完）---"
+          sleep 8
           xcrun simctl io "$DEV" screenshot shots/shot-2-loaded.png
           ls -la shots/
-          # 模拟器日志里看有没有页面加载记录
-          xcrun simctl spawn "$DEV" log show --last 2m --predicate 'processImagePath CONTAINS "App"' 2>/dev/null | tail -30 || true
+          echo "--- 模拟后端收到的请求 ---"
+          cat /tmp/mock.log | tail -20
+          echo "--- App 日志 ---"
+          xcrun simctl spawn "$DEV" log show --last 3m --predicate 'processImagePath CONTAINS "App"' 2>/dev/null | grep -iE "error|webview|load|fail" | tail -15 || true
 
       - name: 上传产物
         if: always()
