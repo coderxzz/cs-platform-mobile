@@ -97,6 +97,18 @@ jobs:
         run: |
           # 静态根目录必须是 html 产物所在目录，否则 /chat 会 404
           cd web/dist/html
+          # 注入：页面加载后自动聚焦输入框，这样真实键盘事件才有落点
+          python3 - <<'PYEOF'
+          import io
+          fp = 'chat.html'
+          s = io.open(fp, encoding='utf-8').read()
+          if 'CI_FOCUS' not in s:
+              s = s.replace('</body>', '<script>/*CI_FOCUS*/window.addEventListener("load",function(){setTimeout(function(){var el=document.querySelector(".chat-input");if(el){el.focus();}},1200);});</script></body>')
+              io.open(fp, 'w', encoding='utf-8').write(s)
+              print('聚焦脚本已注入')
+          else:
+              print('已存在')
+          PYEOF
           WEB_ROOT="$(pwd)" nohup python3 "$GITHUB_WORKSPACE/ci-mock-server.py" 8000 > /tmp/mock.log 2>&1 &
           sleep 3
           echo "--- 自检 ---"
@@ -125,42 +137,36 @@ jobs:
           xcrun simctl install "$DEV" "$APP"
           xcrun simctl launch "$DEV" com.cokutau.csapp
 
-      - name: 装 idb（用来点按钮和模拟键盘输入）
-        run: |
-          brew tap facebook/fb || true
-          brew install idb-companion || true
-          python3 -m pip install --quiet fb-idb || true
-          which idb || echo "idb 没装上，后面会退化"
-
-      - name: 真实键盘输入 + 点发送（验证 AI 回复）
-        run: |
-          set -x
-          # 屏幕是 393x852 点。输入框在底部，发送按钮在右下。
-          # 坐标从截图量出来：输入框中心 ~ (200, 790)，发送按钮 ~ (345, 790)
-          idb ui tap 200 790 --udid "$DEV" || echo "tap input 失败"
-          sleep 2
-          xcrun simctl io "$DEV" screenshot shots/shot-3-focused.png || true
-
-          # 模拟键盘输入（中文）
-          idb ui text "我的充值没到账" --udid "$DEV" || echo "输入失败"
-          sleep 2
-          xcrun simctl io "$DEV" screenshot shots/shot-4-typed.png || true
-
-          # 点发送
-          idb ui tap 345 790 --udid "$DEV" || echo "tap send 失败"
-          sleep 8
-          xcrun simctl io "$DEV" screenshot shots/shot-5-replied.png || true
-          ls -la shots/
-
       - name: 等页面加载并截图
         run: |
           set -e
           mkdir -p shots
-          sleep 15
+          sleep 18
           xcrun simctl io "$DEV" screenshot shots/shot-1-launch.png
-          echo "--- 再来一张（等会话交换完）---"
-          sleep 8
+          sleep 6
           xcrun simctl io "$DEV" screenshot shots/shot-2-loaded.png
+
+      - name: 真实键盘输入 + 回车发送（验证 AI 回复）
+        run: |
+          set -x
+          # 让模拟器接受宿主机硬件键盘
+          defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool true || true
+          osascript -e 'tell application "Simulator" to activate' || true
+          sleep 3
+
+          # 真实键盘敲字符（页面已在加载后自动聚焦输入框）
+          osascript -e 'tell application "System Events" to keystroke "wo de chong zhi mei dao zhang"' || echo "keystroke 失败"
+          sleep 3
+          xcrun simctl io "$DEV" screenshot shots/shot-3-typed.png || true
+
+          # 真实回车发送（输入框绑了 @keydown.enter.exact.prevent）
+          osascript -e 'tell application "System Events" to key code 36' || echo "回车失败"
+          sleep 10
+          xcrun simctl io "$DEV" screenshot shots/shot-4-replied.png || true
+          echo "--- 截图 ---"
+          ls -la shots/
+          echo "--- 模拟后端收到的请求 ---"
+          tail -20 /tmp/mock.log || true
           ls -la shots/
           echo "--- 模拟后端收到的请求 ---"
           cat /tmp/mock.log | tail -20
