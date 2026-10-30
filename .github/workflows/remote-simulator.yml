@@ -1,0 +1,129 @@
+name: remote-simulator
+
+# 用途：把云端 macOS 的桌面 + iOS 模拟器，通过浏览器暴露给你上手操作。
+#
+# 原理：
+#   1. 开 macOS 自带的屏幕共享（VNC，5900）
+#   2. websockify + noVNC 把 VNC 转成网页，监听 6080
+#   3. cloudflared 快速隧道把 6080 暴露成公网 HTTPS 地址
+#   4. 你在浏览器打开那个地址，就看到一台 Mac 桌面，里面有 iOS 模拟器
+#
+# 注意：
+#   - 这是临时环境，最长 6 小时后自动销毁
+#   - 有密码保护，密码每次运行随机生成，打印在日志里
+#   - 用完可以手动取消这次运行，机器立刻回收
+
+on:
+  workflow_dispatch:
+
+jobs:
+  remote:
+    runs-on: macos-14
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 设置 VNC 密码
+        id: pw
+        run: |
+          PW="cs$(openssl rand -hex 4)"
+          echo "PASSWORD=$PW" >> $GITHUB_ENV
+          echo "::notice::VNC 密码 = $PW"
+          echo "VNC 密码: $PW"
+          # macOS 的 VNC 密码存在这个文件里（加密格式）
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+            -configure -clientopts -setvnclegacy -vnclegacy yes \
+            -setvncpw -vncpw "$PW" \
+            -restart -agent 2>&1 | tail -3 || echo "设置 VNC 密码失败"
+
+      - name: 打开屏幕共享
+        run: |
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+            -activate -configure -access -on \
+            -restart -agent -privs -all 2>&1 | tail -5 || true
+          sleep 3
+          echo "--- 5900 端口 ---"
+          (nc -z 127.0.0.1 5900 && echo "VNC 已监听") || echo "VNC 没起来"
+          sudo launchctl list | grep -i -E "screensharing|ARDAgent" || true
+
+      - name: 装 noVNC + websockify
+        run: |
+          python3 -m pip install --quiet websockify || pip3 install --quiet websockify || true
+          git clone --depth 1 https://github.com/novnc/noVNC.git /tmp/novnc 2>&1 | tail -2
+          ls /tmp/novnc/vnc.html && echo "noVNC 就绪"
+
+      - name: 起模拟器（装我们的 App）
+        run: |
+          # 先装一个 iPhone，方便你直接看到界面
+          xcrun simctl list devices available | grep -i iphone | head -3
+          DEV=$(xcrun simctl list devices available | grep -iE "iPhone 1[5-7]" | head -1 | sed -E 's/.*\(([0-9A-F-]{36})\).*/\1/')
+          [ -z "$DEV" ] && DEV=$(xcrun simctl list devices available | grep -i iphone | head -1 | sed -E 's/.*\(([0-9A-F-]{36})\).*/\1/')
+          echo "DEV=$DEV" >> $GITHUB_ENV
+          echo "DEV=$DEV"
+          xcrun simctl boot "$DEV" || true
+          xcrun simctl bootstatus "$DEV" -b
+          # 打开 Simulator.app，这样桌面里能看到它
+          open -a Simulator || true
+          sleep 5
+
+      - name: 起 noVNC 并开隧道
+        run: |
+          cd /tmp/novnc
+          # 把 VNC 转成网页
+          nohup websockify --web /tmp/novnc 6080 127.0.0.1:5900 > /tmp/websockify.log 2>&1 &
+          echo $! > /tmp/ws.pid
+          sleep 4
+          curl -s -o /dev/null -w "  noVNC 本地: %{http_code}\n" http://127.0.0.1:6080/vnc.html
+
+          # cloudflared 快速隧道
+          cd /tmp
+          curl -sL --max-time 120 \
+            "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-darwin-amd64.tgz" \
+            -o cf.tgz
+          tar xzf cf.tgz 2>/dev/null || true
+          chmod +x cloudflared 2>/dev/null || true
+          ./cloudflared --version || echo "cloudflared 没下到"
+
+          nohup ./cloudflared tunnel --url http://127.0.0.1:6080 --no-autoupdate > /tmp/cf.log 2>&1 &
+          echo $! > /tmp/cf.pid
+          sleep 25
+
+          echo "=================== 访问地址 ==================="
+          grep -oE "https://[a-z0-9-]+\.trycloudflare\.com" /tmp/cf.log | head -1
+          echo "=============================================="
+          cat /tmp/cf.log | tail -20
+
+      - name: 打印访问信息并保持运行
+        run: |
+          URL=$(grep -oE "https://[a-z0-9-]+\.trycloudflare\.com" /tmp/cf.log | head -1)
+          echo "::notice::模拟器地址: $URL/vnc.html?autoconnect=1&password=$PASSWORD"
+          cat <<EOF
+
+          ============================================================
+                    你的云端 iOS 模拟器已就绪
+          ============================================================
+
+            网址  : $URL/vnc.html?autoconnect=1&password=$PASSWORD
+            密码  : $PASSWORD
+
+          打开后在地址栏补上这个完整路径就能直连。
+          进去会看到一台 Mac 桌面，中间就是 iPhone 模拟器，鼠标直接点。
+
+          这次运行最长 90 分钟，到点自动销毁。
+          想提前结束：在 Actions 页面点 Cancel workflow。
+
+          ============================================================
+          EOF
+
+          # 保持机器活着
+          for i in $(seq 1 88); do
+            sleep 60
+            if ! kill -0 $(cat /tmp/cf.pid) 2>/dev/null; then
+              echo "隧道断了，重建"
+              cd /tmp && nohup ./cloudflared tunnel --url http://127.0.0.1:6080 --no-autoupdate > /tmp/cf.log 2>&1 &
+              echo $! > /tmp/cf.pid
+              sleep 20
+              grep -oE "https://[a-z0-9-]+\.trycloudflare\.com" /tmp/cf.log | head -1
+            fi
+            echo "[$i 分钟] 隧道存活"
+          done
