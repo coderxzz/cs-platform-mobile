@@ -5,6 +5,10 @@ import AdminView from '@/views/admin/AdminView.vue'
 import { configureApi } from '@/shared/api'
 import { token, clearSession, hasPermissionDirective } from '@/shared/auth'
 import '@/styles/base.css'
+import { applySafeArea } from '@/shared/safearea'
+
+// env(safe-area-inset-*) 在某些 WebView 容器里返回 0，这里兜底
+applySafeArea()
 
 configureApi({
   getToken: () => token.value,
