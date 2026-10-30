@@ -137,14 +137,25 @@ jobs:
           xcrun simctl install "$DEV" "$APP"
           xcrun simctl launch "$DEV" com.cokutau.csapp
 
-      - name: 等页面加载并截图
+      - name: 开始录屏
+        run: |
+          mkdir -p shots
+          # 后台录屏，最后一步再停
+          nohup xcrun simctl io "$DEV" recordVideo --codec=h264 --force shots/simulator.mp4 > /tmp/rec.log 2>&1 &
+          echo $! > /tmp/rec.pid
+          sleep 3
+          echo "录屏已启动 pid=$(cat /tmp/rec.pid)"
+
+      - name: 等页面加载并密集截图
         run: |
           set -e
           mkdir -p shots
-          sleep 18
-          xcrun simctl io "$DEV" screenshot shots/shot-1-launch.png
-          sleep 6
-          xcrun simctl io "$DEV" screenshot shots/shot-2-loaded.png
+          # 每秒一张，把加载过程完整记下来
+          for i in $(seq 1 12); do
+            sleep 2
+            xcrun simctl io "$DEV" screenshot "shots/frame-$(printf '%02d' $i)-load.png" 2>/dev/null || true
+          done
+          echo "加载帧数: $(ls shots/frame-*-load.png 2>/dev/null | wc -l)"
 
       - name: 真实键盘输入 + 回车发送（验证 AI 回复）
         run: |
@@ -156,17 +167,27 @@ jobs:
 
           # 真实键盘敲字符（页面已在加载后自动聚焦输入框）
           osascript -e 'tell application "System Events" to keystroke "wo de chong zhi mei dao zhang"' || echo "keystroke 失败"
-          sleep 3
-          xcrun simctl io "$DEV" screenshot shots/shot-3-typed.png || true
+          sleep 2
+          xcrun simctl io "$DEV" screenshot shots/frame-13-typed.png || true
 
           # 真实回车发送（输入框绑了 @keydown.enter.exact.prevent）
           osascript -e 'tell application "System Events" to key code 36' || echo "回车失败"
-          sleep 10
-          xcrun simctl io "$DEV" screenshot shots/shot-4-replied.png || true
-          echo "--- 截图 ---"
-          ls -la shots/
+          for i in $(seq 14 22); do
+            sleep 1
+            xcrun simctl io "$DEV" screenshot "shots/frame-$i-send.png" 2>/dev/null || true
+          done
+          echo "--- 共 $(ls shots/*.png 2>/dev/null | wc -l) 帧 ---"
           echo "--- 模拟后端收到的请求 ---"
-          tail -20 /tmp/mock.log || true
+          tail -25 /tmp/mock.log || true
+
+      - name: 停止录屏
+        if: always()
+        run: |
+          if [ -f /tmp/rec.pid ]; then
+            kill -INT $(cat /tmp/rec.pid) 2>/dev/null || true
+            sleep 5
+          fi
+          ls -la shots/simulator.mp4 2>/dev/null || echo "没有录到视频"
           ls -la shots/
           echo "--- 模拟后端收到的请求 ---"
           cat /tmp/mock.log | tail -20
@@ -181,6 +202,7 @@ jobs:
           path: |
             cs-app-simulator.zip
             shots/*.png
+            shots/*.mp4
           retention-days: 14
           if-no-files-found: warn
 
@@ -190,7 +212,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="build-${{ github.run_number }}"
-          gh release create "$TAG" cs-app-simulator.zip shots/*.png \
+          gh release create "$TAG" cs-app-simulator.zip shots/*.png shots/*.mp4 \
             --title "iOS 构建 ${{ github.run_number }}" \
             --notes "commit ${{ github.sha }}" \
             --repo "${{ github.repository }}" || true
