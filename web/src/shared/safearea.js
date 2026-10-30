@@ -8,13 +8,21 @@
  * 策略：
  *   1. 先用探针读 env() 的真实值
  *   2. 非 0 -> 直接用（安卓 WebView、Safari、较新的 iOS 都正常）
- *   3. 是 0 且是 iPhone -> 按机型给经验值
+ *   3. 是 0 且是 iPhone -> 按屏幕长边分档给经验值
  *   4. 写回 CSS 变量 --safe-t / --safe-b
  */
 
-const NOTCH_TOP = 47   // iPhone X 及之后的刘海/灵动岛机型
-const NOTCH_BOTTOM = 34
-const OLD_TOP = 20     // iPhone 8 及之前
+// 按屏幕长边（CSS 点）分档。数据来自各机型实际安全区。
+// 长边 812 = iPhone X / XS / 11 Pro（刘海）
+// 长边 844 = iPhone 12 / 13 / 14（刘海）
+// 长边 852+ = iPhone 14 Pro / 15 / 16（灵动岛）
+// 长边 < 812 = iPhone SE / 8 等（非全面屏）
+const TIERS = [
+  { min: 852, t: 59, b: 34, name: '灵动岛' },
+  { min: 844, t: 47, b: 34, name: '刘海(12/13/14)' },
+  { min: 812, t: 44, b: 34, name: '刘海(X/XS/11Pro)' },
+  { min: 0, t: 20, b: 0, name: '非全面屏' }
+]
 
 function readEnv() {
   const probe = document.createElement('div')
@@ -29,37 +37,34 @@ function readEnv() {
   return { t, b }
 }
 
-function guessIPhone() {
+export function guessIPhone() {
   const ua = navigator.userAgent || ''
   if (!/iPhone|iPod/.test(ua)) return null
-  // iPhone 15 是 393x852，除以 dpr 后长边 852
   // 注意：WKWebView 里 screen.width/height 已经是 CSS 点（不是设备像素），
   // 实测 iPhone 15 返回 393x852、dpr=3。再除 dpr 会算成 284，误判成非刘海机型。
   const longSide = Math.max(window.screen.width, window.screen.height)
-  const notched = longSide >= 812
-  return {
-    t: notched ? NOTCH_TOP : OLD_TOP,
-    b: notched ? NOTCH_BOTTOM : 0
-  }
+  const tier = TIERS.find(x => longSide >= x.min) || TIERS[TIERS.length - 1]
+  return { t: tier.t, b: tier.b, tier: tier.name, longSide }
 }
 
 export function applySafeArea() {
   const root = document.documentElement
   let { t, b } = readEnv()
+  let source = 'env'
 
   if (t === 0 && b === 0) {
     const guess = guessIPhone()
     if (guess) {
       t = guess.t
       b = guess.b
-      // 留个标记，方便排查时确认走的是兜底
-      root.dataset.safeFallback = '1'
+      source = 'guess:' + guess.tier
+      root.dataset.safeFallback = guess.tier
     }
   }
 
   if (t > 0) root.style.setProperty('--safe-t', t + 'px')
   if (b > 0) root.style.setProperty('--safe-b', b + 'px')
-  return { t, b }
+  return { t, b, source }
 }
 
 export default applySafeArea

@@ -107,8 +107,12 @@ const placeholder = computed(() =>
 function key(m) { return m.key || ('m' + (++seq)) }
 
 function push(m) {
+  // 注意：必须返回数组里的那个元素（Vue 的响应式代理）。
+  // 之前 push 的是一个新对象，调用方还拿着原始普通对象改 state，
+  // 不会触发重渲染 —— 表现就是消息永远停在「发送中」。
   messages.value.push({ key: key(m), ts: Date.now(), ...m })
   scrollToBottom()
+  return messages.value[messages.value.length - 1]
 }
 
 function sys(text) { push({ type: 'system', text }) }
@@ -142,8 +146,7 @@ async function send(text) {
   draft.value = ''
   autoGrow()
 
-  const local = { mine: true, text: t, state: 'sending' }
-  push(local)
+  const local = push({ mine: true, text: t, state: 'sending' })
 
   if (!channelId) {
     local.state = 'failed'

@@ -66,9 +66,10 @@ html, body {
 /* ---------- 顶栏 ---------- */
 .topbar {
   flex: 0 0 auto;
-  /* 必须用 min-height：全局 box-sizing 是 border-box，
-     height + padding-top 会让 padding 吃掉内容高度，安全区形同虚设 */
-  min-height: 48px;
+  /* 注意：全局 box-sizing 是 border-box。
+     如果只写 min-height: 48px，padding-top（安全区）会吃掉内容高度，
+     导致内容区变成 4px。必须把安全区加进 min-height 里。 */
+  min-height: calc(48px + var(--safe-t));
   padding-top: var(--safe-t);
   display: flex;
   align-items: center;
