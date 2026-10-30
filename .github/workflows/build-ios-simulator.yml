@@ -17,6 +17,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# 需要写权限才能创建 Release
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: macos-14
@@ -92,4 +96,19 @@ jobs:
           name: ios-simulator-app
           path: cs-app-simulator.zip
           retention-days: 14
+
+      # 发布成 Release 资产：公有仓库的 Release 下载不需要登录，
+      # 这样命令行也能取，不用点浏览器。
+      - name: 发布 Release（免登录下载）
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="build-${{ github.run_number }}"
+          gh release create "$TAG" cs-app-simulator.zip \
+            --title "iOS 模拟器包 ${{ github.run_number }}" \
+            --notes "commit ${{ github.sha }}" \
+            --repo "${{ github.repository }}" || \
+          gh release upload "$TAG" cs-app-simulator.zip --clobber --repo "${{ github.repository }}"
+          echo "下载地址：https://github.com/${{ github.repository }}/releases/download/$TAG/cs-app-simulator.zip"
           if-no-files-found: warn
