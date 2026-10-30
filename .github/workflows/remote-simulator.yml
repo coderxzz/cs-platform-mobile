@@ -14,7 +14,12 @@ name: remote-simulator
 #   - 用完可以手动取消这次运行，机器立刻回收
 
 on:
+  push:
+    branches: [simulator-live]
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   remote:
@@ -92,6 +97,26 @@ jobs:
           grep -oE "https://[a-z0-9-]+\.trycloudflare\.com" /tmp/cf.log | head -1
           echo "=============================================="
           cat /tmp/cf.log | tail -20
+
+      - name: 把访问地址写回仓库
+        run: |
+          URL=$(grep -oE "https://[a-z0-9-]+\.trycloudflare\.com" /tmp/cf.log | head -1)
+          if [ -z "$URL" ]; then
+            echo "没拿到隧道地址，跳过回写"
+            exit 0
+          fi
+          cat > remote-url.txt <<EOF
+          URL=$URL/vnc.html?autoconnect=1&password=$PASSWORD
+          PASSWORD=$PASSWORD
+          RUN=$GITHUB_RUN_ID
+          READY_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          EOF
+          cat remote-url.txt
+          git config user.name "simulator-bot"
+          git config user.email "simulator-bot@users.noreply.github.com"
+          git add remote-url.txt
+          git commit -m "云端模拟器已就绪 [skip ci]" || true
+          git push origin HEAD:simulator-live || echo "回写失败"
 
       - name: 打印访问信息并保持运行
         run: |
