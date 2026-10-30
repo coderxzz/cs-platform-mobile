@@ -33,7 +33,9 @@ function guessIPhone() {
   const ua = navigator.userAgent || ''
   if (!/iPhone|iPod/.test(ua)) return null
   // iPhone 15 是 393x852，除以 dpr 后长边 852
-  const longSide = Math.max(window.screen.width, window.screen.height) / (window.devicePixelRatio || 1)
+  // 注意：WKWebView 里 screen.width/height 已经是 CSS 点（不是设备像素），
+  // 实测 iPhone 15 返回 393x852、dpr=3。再除 dpr 会算成 284，误判成非刘海机型。
+  const longSide = Math.max(window.screen.width, window.screen.height)
   const notched = longSide >= 812
   return {
     t: notched ? NOTCH_TOP : OLD_TOP,
