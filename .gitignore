@@ -19,3 +19,4 @@ app-ios/ios/App/Pods/
 app-ios/ios/App/build/
 app-ios/ios/App/App.xcworkspace/xcuserdata/
 *.xcuserstate
+web/dist/

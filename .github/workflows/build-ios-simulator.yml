@@ -1,25 +1,23 @@
 name: build-ios-simulator
 
-# 目标：产出一个「模拟器版 .app」，不需要任何签名。
+# 目标：在真实 iOS 模拟器里跑我们的聊天页，截图存证。
 #
-# 为什么这条路能绕开 Apple 账号：
-#   模拟器构建（-sdk iphonesimulator）根本不走代码签名流程，
-#   所以不需要 Apple ID、不需要开发者账号、不需要描述文件。
+# 为什么这样做：
+#   模拟器构建不需要签名 -> 不需要 Apple 账号
+#   macOS runner 自带 iOS Simulator -> 不需要 Appetize 等第三方服务
+#   公有仓库标准 runner 免费 -> 零成本
 #
-# 为什么用 GitHub Actions：
-#   官方计费文档明确写：公有仓库的标准 runner 免费（含 macOS）。
-#
-# 产出物怎么用：
-#   下载 artifact 里的 zip -> 上传 appetize.io -> 浏览器里跑 iOS
+# 产出：
+#   1. cs-app-simulator.zip（可上传 Appetize 的包）
+#   2. shot-*.png 截图（模拟器里跑起来的真实画面）
+
+permissions:
+  contents: write
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
-
-# 需要写权限才能创建 Release
-permissions:
-  contents: write
 
 jobs:
   build:
@@ -43,27 +41,34 @@ jobs:
           cd app-ios
           rm -rf www && mkdir -p www
           cp -r ../web/dist/html/. www/
-          # Capacitor 要求 www 里有 index.html 作入口；
-          # 我们的构建产物是 chat/desk/admin/submit 四个页面，所以补一个启动页
           cp launcher-index.html www/index.html
           test -f www/index.html || (echo "index.html 缺失" && exit 1)
           npm ci
+          npx cap sync ios
+
+      - name: 让 App 直接加载服务器页面（模拟真实线上形态）
+        run: |
+          cd app-ios
+          # 线上 App 就是 WebView 加载远端聊天页，这里把远端指向 CI 内部服务
+          python3 - <<'PYEOF'
+          import json
+          p = 'capacitor.config.json'
+          c = json.load(open(p, encoding='utf-8'))
+          c.setdefault('server', {})
+          c['server']['url'] = 'http://127.0.0.1:8000/chat?app_id=app_ci&role_id=999001&ts=1&sign=ci'
+          c['server']['cleartext'] = True
+          json.dump(c, open(p, 'w', encoding='utf-8'), ensure_ascii=False, indent=2)
+          print(json.dumps(c, ensure_ascii=False, indent=2))
+          PYEOF
           npx cap sync ios
 
       - name: 安装 CocoaPods 依赖
         run: |
           cd app-ios/ios/App
           pod install --repo-update
-          ls -la
-          echo "--- workspace 是否生成 ---"
           ls -d App.xcworkspace || (echo "workspace 没生成" && exit 1)
 
-      - name: 列出可用 scheme（排错用）
-        run: |
-          cd app-ios/ios/App
-          xcodebuild -workspace App.xcworkspace -list || true
-
-      - name: 编译模拟器版 .app（不签名）
+      - name: 编译模拟器版 App（不签名）
         run: |
           cd app-ios/ios/App
           xcodebuild \
@@ -75,40 +80,79 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_ENTITLEMENTS="" \
             build
 
-      - name: 打包成 appetize 能吃的 zip
+      - name: 打包 zip（可传 Appetize）
         run: |
           set -e
           cd app-ios/ios/App
           APP=$(find build/Build/Products -maxdepth 2 -name "*.app" -type d | head -1)
-          echo "找到 app: $APP"
-          if [ -z "$APP" ]; then echo "没找到 .app"; exit 1; fi
+          echo "app: $APP"
+          [ -n "$APP" ] || exit 1
           cd "$(dirname "$APP")"
           zip -r -y "$GITHUB_WORKSPACE/cs-app-simulator.zip" "$(basename "$APP")"
-          cd "$GITHUB_WORKSPACE"
-          ls -la cs-app-simulator.zip
+          ls -la "$GITHUB_WORKSPACE/cs-app-simulator.zip"
 
-      - uses: actions/upload-artifact@v4
+      - name: 起模拟后端（托管前端 + 假接口）
+        run: |
+          cp ci-mock-server.py web/dist/../ 2>/dev/null || true
+          cd web/dist && python3 "$GITHUB_WORKSPACE/ci-mock-server.py" 8000 > /tmp/mock.log 2>&1 &
+          sleep 2
+          curl -s -o /dev/null -w "首页 HTTP %{http_code}\n" http://127.0.0.1:8000/chat
+          curl -s -X POST http://127.0.0.1:8000/v1/embed/session \
+            -H "Content-Type: application/json" \
+            -d '{"app_id":"app_ci","role_id":"999001"}' | head -c 200
+          echo
+
+      - name: 启动 iOS 模拟器并安装 App
+        run: |
+          set -x
+          xcrun simctl list devices available | grep -i iphone | head -5
+          DEV=$(xcrun simctl list devices available | grep -iE "iPhone 1[5-7]" | head -1 | sed -E 's/.*\(([0-9A-F-]{36})\).*/\1/')
+          if [ -z "$DEV" ]; then
+            DEV=$(xcrun simctl list devices available | grep -i iphone | head -1 | sed -E 's/.*\(([0-9A-F-]{36})\).*/\1/')
+          fi
+          echo "device=$DEV"
+          echo "DEV=$DEV" >> $GITHUB_ENV
+          xcrun simctl boot "$DEV" || true
+          xcrun simctl bootstatus "$DEV" -b
+          APP=$(find app-ios/ios/App/build/Build/Products -maxdepth 2 -name "*.app" -type d | head -1)
+          echo "install $APP"
+          xcrun simctl install "$DEV" "$APP"
+          xcrun simctl launch "$DEV" com.cokutau.csapp
+
+      - name: 等页面加载并截图
+        run: |
+          set -e
+          mkdir -p shots
+          # 页面加载 + 会话交换需要一点时间
+          sleep 12
+          xcrun simctl io "$DEV" screenshot shots/shot-1-launch.png
+          echo "第一张截图完成"
+          xcrun simctl io "$DEV" screenshot shots/shot-2-loaded.png
+          ls -la shots/
+          # 模拟器日志里看有没有页面加载记录
+          xcrun simctl spawn "$DEV" log show --last 2m --predicate 'processImagePath CONTAINS "App"' 2>/dev/null | tail -30 || true
+
+      - name: 上传产物
         if: always()
+        uses: actions/upload-artifact@v4
         with:
-          name: ios-simulator-app
-          path: cs-app-simulator.zip
+          name: ios-build-and-shots
+          path: |
+            cs-app-simulator.zip
+            shots/*.png
           retention-days: 14
+          if-no-files-found: warn
 
-      # 发布成 Release 资产：公有仓库的 Release 下载不需要登录，
-      # 这样命令行也能取，不用点浏览器。
       - name: 发布 Release（免登录下载）
-        if: success()
+        if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="build-${{ github.run_number }}"
-          gh release create "$TAG" cs-app-simulator.zip \
-            --title "iOS 模拟器包 ${{ github.run_number }}" \
+          gh release create "$TAG" cs-app-simulator.zip shots/*.png \
+            --title "iOS 构建 ${{ github.run_number }}" \
             --notes "commit ${{ github.sha }}" \
-            --repo "${{ github.repository }}" || \
-          gh release upload "$TAG" cs-app-simulator.zip --clobber --repo "${{ github.repository }}"
-          echo "下载地址：https://github.com/${{ github.repository }}/releases/download/$TAG/cs-app-simulator.zip"
-          if-no-files-found: warn
+            --repo "${{ github.repository }}" || true
+          echo "https://github.com/${{ github.repository }}/releases/tag/$TAG"
