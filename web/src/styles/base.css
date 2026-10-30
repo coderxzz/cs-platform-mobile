@@ -1,0 +1,156 @@
+/**
+ * 移动端优先样式。
+ *
+ * 设计约束（按需求）：
+ *   · 只做移动端，不做 PC 布局
+ *   · 大分辨率下把内容居中，四周用背景色遮罩
+ *   · 小游戏 canvas 也属于移动端，所以这里不放任何 hover 效果
+ */
+
+:root {
+  --bg: #f2f3f5;
+  --panel: #ffffff;
+  --line: #e5e6eb;
+  --fg: #1d2129;
+  --fg-2: #4e5969;
+  --dim: #86909c;
+  --accent: #1677ff;
+  --accent-2: #e8f3ff;
+  --danger: #f53f3f;
+  --warn: #ff7d00;
+  --ok: #00b42a;
+  --radius: 12px;
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-t: env(safe-area-inset-top, 0px);
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: #0b0d12;              /* 大屏遮罩色 */
+  color: var(--fg);
+  font: 14px/1.5 -apple-system, BlinkMacSystemFont, 'PingFang SC',
+        'Helvetica Neue', 'Microsoft YaHei', sans-serif;
+  overscroll-behavior: none;
+}
+
+#app { height: 100%; }
+
+/**
+ * 应用外壳：手机上铺满，桌面上居中成一个"手机宽度"的窗口。
+ * 这是需求里说的「大分辨率下居中 + 四周遮罩」。
+ */
+.app-shell {
+  position: relative;
+  height: 100%;
+  width: 100%;
+  margin: 0 auto;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+@media (min-width: 560px) {
+  .app-shell {
+    max-width: 480px;
+    margin: 0 auto;
+    height: 100vh;
+    box-shadow: 0 0 0 1px rgba(255,255,255,.06);
+  }
+}
+
+/* ---------- 顶栏 ---------- */
+.topbar {
+  flex: 0 0 auto;
+  height: 48px;
+  padding-top: var(--safe-t);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 12px;
+  padding-right: 12px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+.topbar h1 { font-size: 16px; font-weight: 600; margin: 0; flex: 1; }
+.topbar .sub { font-size: 12px; color: var(--dim); font-weight: 400; }
+
+/* ---------- 滚动区 ---------- */
+.scroll { flex: 1 1 auto; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.scroll::-webkit-scrollbar { width: 0; }
+
+/* ---------- 通用列表 ---------- */
+.list-item {
+  background: var(--panel);
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.list-item:active { background: #f7f8fa; }
+.list-item .avatar {
+  flex: 0 0 36px; width: 36px; height: 36px; border-radius: 50%;
+  background: var(--accent-2); color: var(--accent);
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 600; font-size: 13px;
+}
+.list-item .body { flex: 1 1 auto; min-width: 0; }
+.list-item .row1 { display: flex; align-items: center; gap: 6px; }
+.list-item .name { font-weight: 600; font-size: 14px; }
+.list-item .time { margin-left: auto; font-size: 11px; color: var(--dim); }
+.list-item .preview {
+  margin-top: 3px; font-size: 13px; color: var(--fg-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* ---------- 标签 ---------- */
+.tag {
+  display: inline-block; padding: 1px 6px; border-radius: 4px;
+  font-size: 11px; line-height: 16px; white-space: nowrap;
+}
+.tag.p-low { background: #f2f3f5; color: var(--fg-2); }
+.tag.p-mid { background: #e8f3ff; color: var(--accent); }
+.tag.p-high { background: #fff7e8; color: var(--warn); }
+.tag.p-urgent { background: #ffece8; color: var(--danger); font-weight: 600; }
+.tag.st-new { background: #e8f3ff; color: var(--accent); }
+.tag.st-processing { background: #e8ffea; color: var(--ok); }
+.tag.st-waiting_user { background: #fff7e8; color: var(--warn); }
+.tag.st-resolved { background: #f2f3f5; color: var(--fg-2); }
+.tag.st-closed { background: #f2f3f5; color: var(--dim); }
+.tag.src { background: #f7e8ff; color: #722ed1; }
+
+/* ---------- 按钮 ---------- */
+.btn {
+  appearance: none; border: 0; border-radius: 8px;
+  padding: 9px 16px; font-size: 14px; font-family: inherit;
+  background: var(--accent); color: #fff;
+  min-height: 38px;
+}
+.btn:active { opacity: .8; }
+.btn.ghost { background: #f2f3f5; color: var(--fg); }
+.btn.danger { background: var(--danger); }
+.btn:disabled { opacity: .45; }
+.btn.sm { padding: 5px 10px; font-size: 12px; min-height: 28px; border-radius: 6px; }
+
+/* ---------- 空状态 / 加载 ---------- */
+.empty {
+  padding: 60px 20px; text-align: center; color: var(--dim); font-size: 13px;
+}
+.loading { padding: 20px; text-align: center; color: var(--dim); font-size: 13px; }
+
+/* ---------- 输入 ---------- */
+.input, .textarea, .select {
+  width: 100%; border: 1px solid var(--line); border-radius: 8px;
+  padding: 10px 12px; font: inherit; color: var(--fg); background: var(--panel);
+  font-size: 16px;            /* iOS 小于 16px 会聚焦放大 */
+  outline: none;
+}
+.input:focus, .textarea:focus { border-color: var(--accent); }
+.textarea { resize: none; min-height: 80px; }
+.field { margin-bottom: 14px; }
+.field label { display: block; font-size: 13px; color: var(--fg-2); margin-bottom: 6px; }

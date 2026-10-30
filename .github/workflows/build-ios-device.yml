@@ -1,0 +1,88 @@
+name: build-ios
+
+# 为什么用 CI 而不是本机：
+#   Windows 上没有 Xcode，无法编译 iOS。
+#   这个工作流跑在 GitHub 的 macOS runner 上，Windows 提交、云端出包。
+#
+# 需要的 Secrets（在仓库 Settings → Secrets 里配）：
+#   BUILD_CERTIFICATE_BASE64   .p12 证书的 base64
+#   P12_PASSWORD               证书密码
+#   BUILD_PROVISION_PROFILE_BASE64  .mobileprovision 的 base64
+#   KEYCHAIN_PASSWORD          临时钥匙串密码（随便设）
+#   APPLE_TEAM_ID              开发者 Team ID
+
+on:
+  push:
+    branches: [main]
+    paths: ['app-ios/**']
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 同步前端产物
+        run: |
+          cd web && npm ci && npm run build
+          cd ../app-ios && rm -rf www && mkdir -p www
+          cp -r ../web/dist/html/. www/
+
+      - name: 安装依赖
+        run: |
+          cd app-ios && npm ci
+          npx cap sync ios
+
+      - name: 导入签名证书
+        env:
+          CERT: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASS: ${{ secrets.P12_PASSWORD }}
+          PROFILE: ${{ secrets.BUILD_PROVISION_PROFILE_BASE64 }}
+          KEYCHAIN_PASS: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          echo $CERT | base64 --decode > /tmp/cert.p12
+          echo $PROFILE | base64 --decode > /tmp/profile.mobileprovision
+          security create-keychain -p "$KEYCHAIN_PASS" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASS" build.keychain
+          security import /tmp/cert.p12 -k build.keychain -P "$P12_PASS" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASS" build.keychain
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          cp /tmp/profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/
+
+      - name: 编译并打包
+        env:
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          cd app-ios/ios/App
+          pod install
+          xcodebuild -workspace App.xcworkspace -scheme App \
+            -configuration Release -archivePath build/App.xcarchive \
+            -allowProvisioningUpdates DEVELOPMENT_TEAM=$TEAM_ID archive
+
+      - name: 导出 IPA
+        run: |
+          cd app-ios/ios/App
+          cat > ExportOptions.plist <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>development</string>
+            <key>compileBitcode</key><false/>
+            <key>stripSwiftSymbols</key><true/>
+          </dict>
+          </plist>
+          EOF
+          xcodebuild -exportArchive -archivePath build/App.xcarchive \
+            -exportOptionsPlist ExportOptions.plist -exportPath build/ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-ipa
+          path: app-ios/ios/App/build/ipa/*.ipa

@@ -1,0 +1,68 @@
+/**
+ * SDK 样式：全部带 .cs-sdk- 前缀，避免影响宿主页面。
+ * 用 fixed 定位 + 高 z-index，大屏下居中，小屏铺满。
+ */
+.cs-sdk-host {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  padding: 0;
+}
+
+.cs-sdk-panel {
+  width: 100%;
+  height: 100%;
+  max-width: 480px;
+  max-height: 100vh;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+@media (min-width: 560px) {
+  .cs-sdk-panel {
+    height: 90vh;
+    max-height: 780px;
+    border-radius: 14px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.28);
+  }
+}
+
+.cs-sdk-bar {
+  flex: 0 0 auto;
+  height: 46px;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  background: #fff;
+  border-bottom: 1px solid #e5e6eb;
+  font: 14px/1 -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif;
+}
+
+.cs-sdk-title {
+  flex: 1;
+  font-weight: 600;
+  color: #1d2129;
+}
+
+.cs-sdk-close {
+  border: 0;
+  background: none;
+  font-size: 22px;
+  line-height: 1;
+  color: #86909c;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+
+.cs-sdk-frame {
+  flex: 1 1 auto;
+  width: 100%;
+  border: 0;
+  background: #f2f3f5;
+}
